@@ -10,7 +10,7 @@ import javax.inject.Inject
 import scala.concurrent.Future
 import scala.language.implicitConversions
 
-case class RestClient @Inject()(configs: Configs)(implicit ac: ActorSystem) {
+case class RestClient @Inject() (configs: Configs)(implicit ac: ActorSystem) {
   val backend = HttpClientFutureBackend()
 
   def memberEndpoint(member: Member) = new MemberEndpoint(this, member)
@@ -19,9 +19,8 @@ case class RestClient @Inject()(configs: Configs)(implicit ac: ActorSystem) {
 class MemberEndpoint(restClient: RestClient, member: Member)(implicit ac: ActorSystem) {
   implicit def uri(path: String): Uri = uri"${restClient.configs.hostUrl}/members/${member.id}"
 
-  def ping(content: JsValue): Future[Unit] = {
+  def ping(content: JsValue): Future[Unit] =
     Future.successful(())
-  }
 
   def pong(member: Member, content: JsValue): Unit = {}
 }

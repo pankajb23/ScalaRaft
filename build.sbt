@@ -2,12 +2,13 @@ ThisBuild / scalaVersion := "2.13.14"
 
 ThisBuild / version := "1.0-SNAPSHOT"
 
+scalafmtOnCompile := true
 
 lazy val common = (project in file("common"))
   .enablePlugins(PlayScala)
   .settings(
-    name := """common""",
-    Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
+    name                        := """common""",
+    Compile / scalaSource       := baseDirectory.value / "src" / "main" / "scala",
     Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
     libraryDependencies ++= Seq(
       guice,
@@ -18,14 +19,12 @@ lazy val common = (project in file("common"))
 lazy val raft = (project in file("raft"))
   .enablePlugins(PlayScala)
   .settings(
-    name := """raft""",
-    Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
+    name                        := """raft""",
+    Compile / scalaSource       := baseDirectory.value / "src" / "main" / "scala",
     Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
-    libraryDependencies ++= Seq(
-      guice,
-      "org.scalatestplus.play" %% "scalatestplus-play" % "5.1.0" % Test
-    )
-  ).dependsOn(common % "compile->compile;test->test")
+    libraryDependencies ++= (common / libraryDependencies).value
+  )
+  .dependsOn(common % "compile->compile;test->test")
 
 lazy val root = (project in file("."))
   .enablePlugins(PlayScala)
@@ -35,4 +34,5 @@ lazy val root = (project in file("."))
       guice,
       "org.scalatestplus.play" %% "scalatestplus-play" % "5.1.0" % Test
     )
-  ).aggregate(common, raft)
+  )
+  .aggregate(common, raft)
