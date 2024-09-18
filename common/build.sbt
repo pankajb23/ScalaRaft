@@ -20,7 +20,9 @@ libraryDependencies ++= Seq(
   "com.typesafe.play" %% "play" % "2.9.0",
   "com.softwaremill.sttp.client3" %% "core" % sttpVersion,  // Add this line
   "com.softwaremill.sttp.client3" %% "akka-http-backend" % sttpVersion,  // Add this line
+  "com.softwaremill.sttp.client3" %% "play-json" % sttpVersion,  // Add this line
   "com.beachape" %% "enumeratum" % enumeratumVersion,  // Add this line
   "com.beachape" %% "enumeratum-play-json" % enumeratumVersion,  // Add this line
   "com.typesafe.play" %% "play-json" % "2.9.4",  // Add this line if not already included
+  "com.softwaremill.retry" %% "retry" % "0.3.6"
 )
