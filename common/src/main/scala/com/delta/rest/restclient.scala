@@ -33,11 +33,11 @@ case class RestClient @Inject() (configs: Configs)(implicit ac: ActorSystem) {
 }
 
 class MemberEndpoint(restClient: RestClient, member: Member)(implicit ac: ActorSystem) {
-  implicit def uri(path: String): Uri = uri"${restClient.configs.hostUrl}/members/${member.id}"
+  implicit def uri(path: String): Uri = uri"${restClient.configs.hostUrl}/members/${member.id}/${path}"
 
   def appendEntry(content: AppendEntry): Future[AppendEntryResponse] =
-    restClient.post[AppendEntry, AppendEntryResponse](uri"/appendEntry", content)
+    restClient.post[AppendEntry, AppendEntryResponse](uri"appendEntry", content)
 
   def requestVote(requestVote: RequestVote)(implicit w: Writes[RequestVote]): Future[ResponseVote] =
-    restClient.post[RequestVote, ResponseVote](uri"/requestVote", requestVote)
+    restClient.post[RequestVote, ResponseVote](uri"requestVote", requestVote)
 }

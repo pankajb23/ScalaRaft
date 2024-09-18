@@ -7,19 +7,24 @@ import com.delta.rest.{
   HeartBeat,
   Initialize,
   LeaderElected,
+  NewEntry,
   PersistableStates,
+  ReElection,
   ReplicaGroup,
   RequestVote,
   ResponseVote,
   RestClient,
-  SendHB
+  SendHB,
+  TransitionToCandidate,
+  VolatileStates,
+  VolatileStatesOnLeader
 }
 import com.delta.utils.ActorPathLogging
 
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.language.postfixOps
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Random, Success}
 
 object Server {
   def props(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient): Props = Props(
@@ -30,22 +35,24 @@ object Server {
 class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     extends Actor
     with ActorPathLogging {
+  val random = new Random()
   import context.dispatcher
 
-  private var currentStates = PersistableStates(0, None, List.empty)
+  private var currentStates = PersistableStates()
+  private var volatileStates = VolatileStates()
+  private var volatileStatesOnLeader = VolatileStatesOnLeader(Map.empty, Map.empty)
+
   // new members can also join the group.
   private var currentMembers = replicaGroup.members
+  private var candidateStateForLastContigousTerm: Int = 0
 
-  override def receive: Receive = uninitialized()
+  // TODO send initialize from outside.
+  override def receive: Receive = candidate()
 
-  def uninitialized(): Receive = {
-    case Initialize =>
-      logger.info("Initializing server as candidate")
-      context.become(candidate())
-      self ! Initialize
-  }
+  private def candidate(): Receive =
+    candidateBehaviour().orElse(requestVote())
 
-  private def candidate(): Receive = {
+  private def candidateBehaviour(): Receive = {
     case Initialize =>
       // vote for self for election
       // increase term count
@@ -53,24 +60,34 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
       logger.info(
         s"Initialized server as candidate, starting election with term ${currentStates.currentTerm}"
       )
+      self ! ReElection
+
+    case ReElection =>
+      logger.info(s"Starting re-election with self term ${currentStates.currentTerm}")
+      startElection()
     // StartElection() and wait for any RPC response from any other server.
+
     case LeaderElected =>
       logger.info("Elected as leader")
+      candidateStateForLastContigousTerm = 0
       context.become(leader())
       self ! Initialize
+
+    case entry: AppendEntry =>
+      // save message but transition.
+      context.become(follower())
+      self ! entry
   }
 
-  var highestTermServing = 0L
   var candidateServing: Option[String] = None
-
   // only in case for candidate and follower not for leader.
   private def requestVote(): Receive = {
     case x: RequestVote =>
       if (x.term >= currentStates.currentTerm) {
-        highestTermServing = x.term
-        currentStates = currentStates.copy(currentTerm = x.term)
+        // updating self term.
+        currentStates = currentStates.withTerm(x.term)
         logger.info(s"Received vote request from ${x.candidateId} in term ${x.term}")
-        if (x.lastLogIndex >= currentStates.lastCommitedLogInex) {
+        if (x.lastLogIndex >= currentStates.lastCommitedLogIndex) {
           logger.info(s"Voting for ${x.candidateId} in term ${x.term}")
           sender() ! ResponseVote(hostId, x.term, voteGranted = true)
         } else {
@@ -81,14 +98,14 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
         logger.info(s"Rejecting vote for ${x.candidateId} in term ${x.term} because of term")
         sender() ! ResponseVote(hostId, currentStates.currentTerm, voteGranted = false)
       }
-    case _ @HeartBeat(term, commitedIndex) =>
-
   }
 
+  private def follower(): Receive = appendEntries()
+
   private def appendEntries(): Receive = {
-    case _ @AppendEntry(leaderTerm, leaderId, prevLogIndex, prevLogTerm, entries) =>
+    case _ @AppendEntry(leaderTerm, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit) =>
       if (currentStates.currentTerm > leaderTerm) {
-        logger.warn(s"Rejecting append entry request from ${leaderId} with term ${leaderTerm} whereas current term is ${currentStates.currentTerm}")
+        logger.warn(s"""Rejecting append entry request from $leaderId with term $leaderTerm whereas current term is ${currentStates.currentTerm}""")
         sender() ! AppendEntryResponse(currentStates.currentTerm, success = false)
       } else {
         // check if the log entry is matching with the leader
@@ -97,61 +114,85 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
         // update the commit index
         // send the response back to the leader
         logger.info(s"Received append entry request from ${leaderId} with term ${leaderTerm}")
-        if (prevLogIndex >= currentStates.lastCommitedLogInex) {
-          logger.info(s"Appending entries from ${leaderId} with term ${leaderTerm}")
-          currentStates = currentStates.withLogs(entries, prevLogIndex)
+        if (currentStates.doesContainAnEntryAtIndex(prevLogIndex, prevLogTerm)) {
+          logger.info(s"""Appending entries from $leaderId with term $leaderTerm""")
+          currentStates = currentStates.withLogs(entries, leaderCommit)
           sender() ! AppendEntryResponse(currentStates.currentTerm, success = true)
         } else {
-          logger.warn(s"Rejecting append entry request from ${leaderId} with term ${leaderTerm} because of log index")
+          logger.warn(s"""Rejecting append entry request from $leaderId with term $leaderTerm because of log index""")
           sender() ! AppendEntryResponse(currentStates.currentTerm, success = false)
         }
       }
   }
 
+  private var hbs: Cancellable = _
   private def leader(): Receive = {
     case Initialize =>
       logger.info(s"Initializing leader with current term ${currentStates.currentTerm}")
       // send periodic heartbeats to all other servers
-      context.system.scheduler.scheduleOnce(100 milliseconds, self, SendHB)
+      hbs = context.system.scheduler.scheduleOnce(100 milliseconds, self, SendHB)
+
+    case NewEntry(entry: String) =>
+      // append the new entry to the log
+      // send the entry to all other servers
+      // update the commit index
+      logger.info(s"Received new entry from client $entry")
+      currentStates = currentStates.addLogs(List(entry))
+      updateAppendEntries()
+
+    case TransitionToCandidate =>
+      hbs.cancel()
+      logger.info("Transitioning to candidate")
+      context.become(candidate())
+      self ! Initialize
 
     case SendHB =>
-      Future
-        .sequence(currentMembers.map { member =>
-          restClient
-            .memberEndpoint(member)
-            .appendEntry(
-              AppendEntry(
-                currentStates.currentTerm,
-                hostId,
-                currentStates.lastCommitedLogInex,
-                0,
-                List.empty
-              )
-            )
-            .transformWith {
-              case Success(value) => Future.successful(value)
-              case Failure(e) =>
-                logger.error(s"Failed to send heartbeat to ${member.id}", e)
-                Future.successful(AppendEntryResponse(currentStates.currentTerm, success = false))
-            }
-        })
-        .map { entries =>
-          if (entries.exists(resp => resp.term > currentStates.currentTerm)) {
-            logger.info("Received higher term from other server, stepping down as leader")
-            context.become(candidate())
-          } else {
-            logger.info("Heartbeat sent to all servers")
-            context.system.scheduler.scheduleOnce(100 milliseconds, self, SendHB)
-          }
-        }
+      updateAppendEntries()
   }
 
-  private def startElection() = {
+  private def updateAppendEntries(): Unit = {
+    val latestLogIndex = currentStates.lastLogIndex()
+    Future
+      .sequence(currentMembers.map { member =>
+        val lastLogIndex = volatileStatesOnLeader.nextIndex.getOrElse(member.id, 0)
+        val lastLogTerm = volatileStatesOnLeader.nextIndexTerm.getOrElse(member.id, 0)
+        restClient
+          .memberEndpoint(member)
+          .appendEntry(
+            AppendEntry(
+              currentStates.currentTerm,
+              hostId,
+              lastLogIndex,
+              lastLogTerm,
+              currentStates.getLogEntriesFromIndex(lastLogIndex),
+              currentStates.lastCommitedLogIndex
+            )
+          )
+          .transformWith {
+            case Success(value) =>
+              volatileStatesOnLeader
+                .updateNextIndex(member.id, latestLogIndex, currentStates.currentTerm)
+              volatileStatesOnLeader.updateMatchIndex(member.id, latestLogIndex)
+              Future.successful(value)
+            case Failure(e) =>
+              logger.error(s"Failed to send heartbeat to ${member.id}", e)
+              Future.successful(AppendEntryResponse(currentStates.currentTerm, success = false))
+          }
+      })
+      .foreach { entries =>
+        if (entries.exists(resp => resp.term > currentStates.currentTerm)) {
+          logger.info("Received higher term from other server, stepping down as leader")
+          self ! TransitionToCandidate
+        }
+      }
+  }
+
+  private def startElection(): Unit = {
     Future
       .sequence(currentMembers.filterNot(x => x.id == hostId).map { member =>
         restClient
           .memberEndpoint(member)
-          .requestVote(RequestVote(currentStates.currentTerm, hostId))
+          .requestVote(RequestVote(currentStates, hostId))
           .transformWith {
             case Success(value) => Future.successful(value)
             case Failure(e) =>
@@ -160,7 +201,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
                 .successful(ResponseVote(member.id, currentStates.currentTerm, voteGranted = false))
           }
       })
-      .map { allVotes =>
+      .foreach { allVotes =>
         // check if majority votes are received
         // if yes, then become leader
         // else, start new election
@@ -169,8 +210,15 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
           logger.info("Majority votes received, elected as leader")
           self ! LeaderElected
         } else {
-          logger.info("Majority votes not received, starting new election after some timeout")
-          context.system.scheduler.scheduleOnce(1 seconds, self, Initialize)
+          val waitTime = (candidateStateForLastContigousTerm + 1) * 2 + random.nextInt(
+            candidateStateForLastContigousTerm
+          )
+          logger.info(s"Majority votes not received, starting new election after some timeout waitTime ${waitTime} after term ${candidateStateForLastContigousTerm}")
+          context.system.scheduler.scheduleOnce(
+            waitTime seconds,
+            self,
+            ReElection
+          )
         }
       }
   }

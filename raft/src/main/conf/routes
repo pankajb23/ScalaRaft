@@ -1,0 +1,4 @@
+
+POST /members/:memberid/appendEntry RequestController.appendEntry(memberid)
+
+POST /members/:memberid/requestVote RequestController.requestVote(memberid)
