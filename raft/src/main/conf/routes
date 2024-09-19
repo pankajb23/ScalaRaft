@@ -1,4 +1,4 @@
 
-POST /members/:memberid/appendEntry RequestController.appendEntry(memberid)
+POST /members/:memberid/appendEntry controller.RequestController.appendEntry(memberid)
 
-POST /members/:memberid/requestVote RequestController.requestVote(memberid)
+POST /members/:memberid/requestVote controller.RequestController.requestVote(memberid)

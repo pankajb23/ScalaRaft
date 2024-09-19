@@ -14,7 +14,7 @@ import scala.language.implicitConversions
 import scala.language.{implicitConversions, postfixOps}
 import retry._
 
-case class RestClient @Inject() (configs: Configs)(implicit ac: ActorSystem) {
+case class RestClient @Inject() (hostUrl:String)(implicit ac: ActorSystem) {
   import ac.dispatcher
   private val backend = HttpClientFutureBackend()
   private val baseRequest = basicRequest.header("Content-Type", "application/json")
@@ -33,7 +33,7 @@ case class RestClient @Inject() (configs: Configs)(implicit ac: ActorSystem) {
 }
 
 class MemberEndpoint(restClient: RestClient, member: Member)(implicit ac: ActorSystem) {
-  implicit def uri(path: String): Uri = uri"${restClient.configs.hostUrl}/members/${member.id}/${path}"
+  implicit def uri(path: String): Uri = uri"${restClient.hostUrl}/members/${member.id}/${path}"
 
   def appendEntry(content: AppendEntry): Future[AppendEntryResponse] =
     restClient.post[AppendEntry, AppendEntryResponse](uri"appendEntry", content)

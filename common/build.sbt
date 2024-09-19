@@ -1,7 +1,3 @@
-ThisBuild / scalaVersion := "2.13.14"
-
-ThisBuild / version := "1.0-SNAPSHOT"
-
 val akkaVersion = "2.8.0"
 val akkaHttpVersion = "10.5.0"
 val log4jVersion = "2.20.0"
@@ -24,5 +20,6 @@ libraryDependencies ++= Seq(
   "com.beachape" %% "enumeratum" % enumeratumVersion,  // Add this line
   "com.beachape" %% "enumeratum-play-json" % enumeratumVersion,  // Add this line
   "com.typesafe.play" %% "play-json" % "2.9.4",  // Add this line if not already included
-  "com.softwaremill.retry" %% "retry" % "0.3.6"
+  "com.softwaremill.retry" %% "retry" % "0.3.6",
+  "com.typesafe.akka" %% "akka-serialization-jackson" % "2.8.0"
 )

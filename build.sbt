@@ -9,7 +9,6 @@ lazy val common = (project in file("common"))
   .settings(
     name := """common""",
     Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
-    Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
     libraryDependencies ++= Seq(
       guice,
       "org.scalatestplus.play" %% "scalatestplus-play" % "5.1.0" % Test
@@ -21,7 +20,6 @@ lazy val lsm = (project in file("lsm"))
   .settings(
     name := """lsm""",
     Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
-    Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
     libraryDependencies ++= (common / libraryDependencies).value
   )
   .dependsOn(common % "compile->compile;test->test")
@@ -31,7 +29,6 @@ lazy val raft = (project in file("raft"))
   .settings(
     name := """raft""",
     Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
-    Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
     libraryDependencies ++= (common / libraryDependencies).value
   )
   .dependsOn(common % "compile->compile;test->test", lsm % "compile->compile;test->test")

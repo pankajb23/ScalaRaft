@@ -1,6 +1,3 @@
-name := """lsm"""
-
-version := "1.0-SNAPSHOT"
 
 
 // Adds additional packages into Twirl

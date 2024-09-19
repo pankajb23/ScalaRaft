@@ -147,6 +147,7 @@ package object rest {
   case class ReplicaGroup(members: List[Member], groupId: String, maxSize: Int = 5)
   object ReplicaGroup {
     implicit val o: OFormat[ReplicaGroup] = Json.format[ReplicaGroup]
+
   }
 
   sealed trait Verbs
