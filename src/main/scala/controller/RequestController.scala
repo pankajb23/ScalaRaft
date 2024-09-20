@@ -31,8 +31,6 @@ class RequestController @Inject() (val controllerComponents: ControllerComponent
     implicit request =>
       stateManager.routeRequest(memberId, request.body).transformWith {
         case Success(value) =>
-          println("value " + value)
-          logger.info("value " + value)
           Future(Ok(Json.toJson(value.asInstanceOf[ResponseVote])))
         case Failure(exception) => Future.failed(exception)
       }

@@ -7,6 +7,7 @@ import com.delta.rest.{
   HeartBeat,
   Initialize,
   LeaderElected,
+  MemberStates,
   NewEntry,
   PersistableStates,
   ReElection,
@@ -36,8 +37,6 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     extends Actor
     with ActorPathLogging {
   import context.dispatcher
-  val random = new Random()
-  import context.dispatcher
 
   override def preStart(): Unit =
     logger.info(s"Starting server with id ${self.path.toStringWithoutAddress}")
@@ -49,14 +48,14 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
   // new members can also join the group.
   private var currentMembers = replicaGroup.members
   private var candidateStateForLastContigousTerm: Int = 1
+  private var currentMemberState: MemberStates = MemberStates.Candidate
 
-  // TODO send initialize from outside.
   override def receive: Receive = candidate()
 
-  private def candidate(): Receive =
-    candidateBehaviour().orElse(requestVote())
+  private def candidate(messages: List[Any] = Nil): Receive =
+    requestVote().orElse(candidateBehaviour())
 
-  private def candidateBehaviour(): Receive = {
+  private def candidateBehaviour(messages: List[Any] = Nil): Receive = {
     case Initialize =>
       // vote for self for election
       // increase term count
@@ -74,11 +73,14 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     case LeaderElected =>
       logger.info("Elected as leader")
       candidateStateForLastContigousTerm = 1
+      currentMemberState = MemberStates.Leader
       context.become(leader())
       self ! Initialize
 
     case entry: AppendEntry =>
       // save message but transition.
+      logger.info("Becoming follower")
+      currentMemberState = MemberStates.Follower
       context.become(follower())
       self ! entry
   }
@@ -94,7 +96,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
       ) {
         // updating self term.
         currentStates = currentStates.withTerm(x.term)
-        mappedTermLeaderTuple = Some(x.term, x.candidateId)
+        mappedTermLeaderTuple = Option((x.term, x.candidateId))
         logger.info(s"Received vote request from ${x.candidateId} in term ${x.term}")
         if (x.lastLogIndex >= currentStates.lastCommitedLogIndex) {
           logger.info(s"Voting for ${x.candidateId} in term ${x.term}")
@@ -104,7 +106,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
           sender() ! ResponseVote(hostId, currentStates.currentTerm, voteGranted = false)
         }
       } else {
-        logger.info(s"Rejecting vote for ${x.candidateId} in term ${x.term} because of term")
+        logger.info(s"Rejecting vote for ${x.candidateId} in term ${x.term} because of term is less than current term ${currentStates.currentTerm} and mappedLeaderTuple ${mappedTermLeaderTuple}")
         sender() ! ResponseVote(hostId, currentStates.currentTerm, voteGranted = false)
       }
   }
@@ -113,9 +115,10 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
 
   private def appendEntries(): Receive = {
     case _ @AppendEntry(leaderTerm, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit) =>
+      val sender = context.sender()
       if (currentStates.currentTerm > leaderTerm) {
-        logger.warn(s"""Rejecting append entry request from $leaderId with term $leaderTerm whereas current term is ${currentStates.currentTerm}""")
-        sender() ! AppendEntryResponse(currentStates.currentTerm, success = false)
+        logger.warn(s"""Rejecting append entry request from $leaderId with term $leaderTerm whereas current term is ${currentStates.currentTerm} from ${sender.path.toStringWithoutAddress}""")
+        sender ! AppendEntryResponse(currentStates.currentTerm, success = false)
       } else {
         // check if the log entry is matching with the leader
         // if not, then delete the log entries from the index and append the new entries
@@ -124,22 +127,25 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
         // send the response back to the leader
         logger.info(s"Received append entry request from ${leaderId} with term ${leaderTerm}")
         if (currentStates.doesContainAnEntryAtIndex(prevLogIndex, prevLogTerm)) {
-          logger.info(s"""Appending entries from $leaderId with term $leaderTerm""")
+          logger.info(s"""Appending entries from $leaderId with term $leaderTerm from ${sender.path.toStringWithoutAddress}""")
           currentStates = currentStates.withLogs(entries, leaderCommit)
-          sender() ! AppendEntryResponse(currentStates.currentTerm, success = true)
+          sender ! AppendEntryResponse(currentStates.currentTerm, success = true)
         } else {
-          logger.warn(s"""Rejecting append entry request from $leaderId with term $leaderTerm because of log index""")
-          sender() ! AppendEntryResponse(currentStates.currentTerm, success = false)
+          logger.warn(s"""Rejecting append entry request from $leaderId with term $leaderTerm because of log index from ${sender.path.toStringWithoutAddress}""")
+          sender ! AppendEntryResponse(currentStates.currentTerm, success = false)
         }
       }
+//    case _@AppendEntryResponse(term, flag) =>
+
   }
 
   private var hbs: Cancellable = _
   private def leader(): Receive = {
     case Initialize =>
-      logger.info(s"Initializing leader with current term ${currentStates.currentTerm}")
+      logger.info(s"Initialized leader with current term ${currentStates.currentTerm}")
       // send periodic heartbeats to all other servers
-      hbs = context.system.scheduler.scheduleOnce(100 milliseconds, self, SendHB)
+      self ! SendHB
+      hbs = context.system.scheduler.scheduleAtFixedRate(0.seconds, 5 seconds, self, SendHB)
 
     case NewEntry(entry: String) =>
       // append the new entry to the log
@@ -152,6 +158,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     case TransitionToCandidate =>
       hbs.cancel()
       logger.info("Transitioning to candidate")
+      currentMemberState = MemberStates.Candidate
       context.become(candidate())
       self ! Initialize
 
@@ -164,6 +171,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     Future
       .sequence(
         currentMembers
+          .filterNot(x => x.id == hostId)
           .map { member =>
             val lastLogIndex = volatileStatesOnLeader.nextIndex.getOrElse(member.id, 0L)
             val lastLogTerm = volatileStatesOnLeader.nextIndexTerm.getOrElse(member.id, 0L)
@@ -217,14 +225,20 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
         // check if majority votes are received
         // if yes, then become leader
         // else, start new election
-        val canElectLeader = allVotes.count(_.voteGranted) > (replicaGroup.maxSize / 2)
+        val grantedVotes = allVotes.count(_.voteGranted)
+        val quorumVotes = replicaGroup.maxSize / 2
+        val canElectLeader = grantedVotes > quorumVotes
+        logger.info(s"Received votes from all servers ${allVotes} grantedVotes:${grantedVotes} quorumVotes:$quorumVotes")
         if (canElectLeader) {
           logger.info("Majority votes received, elected as leader")
           self ! LeaderElected
         } else {
           val waitTime =
-            BackOffComputation.computeBackoff(candidateStateForLastContigousTerm).toMillis.milliseconds
-          logger.info(s"Majority votes not received, starting new election after some timeout waitTime ${waitTime} after term ${candidateStateForLastContigousTerm}")
+            BackOffComputation
+              .computeBackoff(candidateStateForLastContigousTerm)
+              .toMillis
+              .milliseconds
+          logger.info(s"Majority votes not received, starting new election after some timeout waitTime $waitTime after term ${currentStates.currentTerm}")
           context.system.scheduler.scheduleOnce(
             waitTime,
             self,
@@ -233,4 +247,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
         }
       }
   }
+
+  override def unhandled(message: Any): Unit =
+    logger.warn(s"Unhandled message $message current state ${currentMemberState}")
 }

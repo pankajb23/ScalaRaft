@@ -2,6 +2,7 @@ package com.delta
 
 import akka.actor.FSM.CurrentState
 import com.delta.rest.LogEntry.CommandEntry
+import com.typesafe.scalalogging.LazyLogging
 import play.api.libs.json.{JsValue, Json, OFormat}
 
 import scala.collection.immutable.TreeMap
@@ -69,11 +70,14 @@ package object rest {
     log: Map[Long, LogEntry] = TreeMap.empty,
     lastCommitedLogIndex: Long = 0L,
     persistableLogs: List[LogEntry] = List.empty
-  ) {
+  ) extends LazyLogging {
     def incrementTerm: PersistableStates = copy(currentTerm = currentTerm + 1)
 
-    def doesContainAnEntryAtIndex(index: Long, term: Long): Boolean =
-      log.get(index).exists(entry => entry.asInstanceOf[CommandEntry].term == term)
+    def doesContainAnEntryAtIndex(index: Long, term: Long): Boolean = {
+      val t = log.get(index)
+      logger.info(s"log entry at index ${t} and term ${term} ")
+      log.isEmpty || log.get(index).exists(entry => entry.asInstanceOf[CommandEntry].term == term)
+    }
 
     def addLogs(entries: List[String]): PersistableStates = {
       val lastIndex = lastLogIndex()
@@ -144,7 +148,7 @@ package object rest {
     }
   }
 
-  case class ReplicaGroup(members: List[Member], groupId: String, maxSize: Int = 5)
+  case class ReplicaGroup(members: List[Member], groupId: String, maxSize: Int = 3)
   object ReplicaGroup {
     implicit val o: OFormat[ReplicaGroup] = Json.format[ReplicaGroup]
 
@@ -181,5 +185,15 @@ package object rest {
   case class NewEntry(entry: String) extends Verbs
   object NewEntry {
     implicit val o: OFormat[NewEntry] = Json.format[NewEntry]
+  }
+
+  sealed trait MemberStates extends enumeratum.EnumEntry
+  object MemberStates
+      extends enumeratum.Enum[MemberStates]
+      with enumeratum.PlayJsonEnum[MemberStates] {
+    override def values: IndexedSeq[MemberStates] = findValues
+    case object Leader extends MemberStates
+    case object Follower extends MemberStates
+    case object Candidate extends MemberStates
   }
 }

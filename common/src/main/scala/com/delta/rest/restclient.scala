@@ -40,7 +40,7 @@ case class RestClient @Inject() (hostUrl: String)(implicit ac: ActorSystem) exte
 }
 
 class MemberEndpoint(restClient: RestClient, member: Member)(implicit ac: ActorSystem) {
-  implicit def ur(path: String): Uri = uri"${restClient.hostUrl}/members/${member.id}/${path}"
+  implicit def ur(path: String): Uri = uri"${restClient.hostUrl}/members/${member.id}/$path"
 
   def appendEntry(content: AppendEntry): Future[AppendEntryResponse] =
     restClient.post[AppendEntry, AppendEntryResponse](ur("appendEntry"), content)
