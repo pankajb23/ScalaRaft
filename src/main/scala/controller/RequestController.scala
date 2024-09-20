@@ -1,31 +1,22 @@
 package controller
 
-import akka.actor.{ActorRef, ActorSystem}
-import akka.pattern.ask
 import com.delta.raft.StateManager
-import com.delta.rest.{
-  AppendEntry,
-  AppendEntryResponse,
-  Initialize,
-  RequestVote,
-  ResponseVote,
-  RestClient
-}
+import com.delta.raft.Utils.ac
+import com.delta.rest._
 import com.google.inject.Inject
-import controller.RequestController.actorSystem
+import com.typesafe.scalalogging.LazyLogging
 import play.api.libs.json.Json
 import play.api.mvc.{Action, AnyContent, BaseController, ControllerComponents}
 
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
-object RequestController {
-  val actorSystem = ActorSystem("raft")
-}
 class RequestController @Inject() (val controllerComponents: ControllerComponents)
-    extends BaseController {
-  import RequestController.actorSystem.dispatcher
-  val restClient = RestClient("http://localhost:9000")(actorSystem)
+    extends BaseController
+    with LazyLogging {
+  implicit val dispatcher = ac.dispatcher
+  logger.info("java klass path " + System.getProperty("java.class.path"))
+  val restClient = RestClient("http://localhost:9000")(ac)
   var stateManager: StateManager = _
 
   def appendEntry(memberId: String): Action[AppendEntry] = Action(parse.json[AppendEntry]).async {
@@ -44,7 +35,8 @@ class RequestController @Inject() (val controllerComponents: ControllerComponent
       }
   }
 
-  def setup(maxReplicaSize: Int): Action[AnyContent] = Action {
+  def setup(): Action[AnyContent] = Action {
+    logger.info("In setup")
     stateManager = StateManager.props(5, "group1", restClient)
     stateManager.initialize()
     Ok("setup done")

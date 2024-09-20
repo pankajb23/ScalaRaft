@@ -35,6 +35,7 @@ object Server {
 class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     extends Actor
     with ActorPathLogging {
+  import context.dispatcher
   val random = new Random()
   import context.dispatcher
 
@@ -44,7 +45,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
 
   // new members can also join the group.
   private var currentMembers = replicaGroup.members
-  private var candidateStateForLastContigousTerm: Int = 0
+  private var candidateStateForLastContigousTerm: Int = 1
 
   // TODO send initialize from outside.
   override def receive: Receive = candidate()
@@ -69,7 +70,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
 
     case LeaderElected =>
       logger.info("Elected as leader")
-      candidateStateForLastContigousTerm = 0
+      candidateStateForLastContigousTerm = 1
       context.become(leader())
       self ! Initialize
 
@@ -153,32 +154,35 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
   private def updateAppendEntries(): Unit = {
     val latestLogIndex = currentStates.lastLogIndex()
     Future
-      .sequence(currentMembers.map { member =>
-        val lastLogIndex = volatileStatesOnLeader.nextIndex.getOrElse(member.id, 0)
-        val lastLogTerm = volatileStatesOnLeader.nextIndexTerm.getOrElse(member.id, 0)
-        restClient
-          .memberEndpoint(member)
-          .appendEntry(
-            AppendEntry(
-              currentStates.currentTerm,
-              hostId,
-              lastLogIndex,
-              lastLogTerm,
-              currentStates.getLogEntriesFromIndex(lastLogIndex),
-              currentStates.lastCommitedLogIndex
-            )
-          )
-          .transformWith {
-            case Success(value) =>
-              volatileStatesOnLeader
-                .updateNextIndex(member.id, latestLogIndex, currentStates.currentTerm)
-              volatileStatesOnLeader.updateMatchIndex(member.id, latestLogIndex)
-              Future.successful(value)
-            case Failure(e) =>
-              logger.error(s"Failed to send heartbeat to ${member.id}", e)
-              Future.successful(AppendEntryResponse(currentStates.currentTerm, success = false))
+      .sequence(
+        currentMembers
+          .map { member =>
+            val lastLogIndex = volatileStatesOnLeader.nextIndex.getOrElse(member.id, 0L)
+            val lastLogTerm = volatileStatesOnLeader.nextIndexTerm.getOrElse(member.id, 0L)
+            restClient
+              .memberEndpoint(member)
+              .appendEntry(
+                AppendEntry(
+                  currentStates.currentTerm,
+                  hostId,
+                  lastLogIndex,
+                  lastLogTerm,
+                  currentStates.getLogEntriesFromIndex(lastLogIndex),
+                  currentStates.lastCommitedLogIndex
+                )
+              )
+              .transformWith {
+                case Success(value) =>
+                  volatileStatesOnLeader
+                    .updateNextIndex(member.id, latestLogIndex, currentStates.currentTerm)
+                  volatileStatesOnLeader.updateMatchIndex(member.id, latestLogIndex)
+                  Future.successful(value)
+                case Failure(e) =>
+                  logger.error(s"Failed to send heartbeat to ${member.id}", e)
+                  Future.successful(AppendEntryResponse(currentStates.currentTerm, success = false))
+              }
           }
-      })
+      )
       .foreach { entries =>
         if (entries.exists(resp => resp.term > currentStates.currentTerm)) {
           logger.info("Received higher term from other server, stepping down as leader")
@@ -196,7 +200,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
           .transformWith {
             case Success(value) => Future.successful(value)
             case Failure(e) =>
-              logger.error(s"Failed to get vote from ${member.id}", e)
+              println(s"Failed to get vote from ${member.id}", e)
               Future
                 .successful(ResponseVote(member.id, currentStates.currentTerm, voteGranted = false))
           }

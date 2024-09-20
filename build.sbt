@@ -29,6 +29,7 @@ lazy val raft = (project in file("raft"))
   .settings(
     name := """raft""",
     Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
+    Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
     libraryDependencies ++= (common / libraryDependencies).value
   )
   .dependsOn(common % "compile->compile;test->test", lsm % "compile->compile;test->test")
@@ -37,9 +38,11 @@ lazy val root = (project in file("."))
   .enablePlugins(PlayScala)
   .settings(
     name := """DSoftware""",
+    Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
     libraryDependencies ++= Seq(
       guice,
       "org.scalatestplus.play" %% "scalatestplus-play" % "5.1.0" % Test
     )
   )
+  .dependsOn(common % "compile->compile;test->test", lsm % "compile->compile;test->test", raft % "compile->compile;test->test")
   .aggregate(common, lsm, raft)

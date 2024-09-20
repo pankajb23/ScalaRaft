@@ -3,7 +3,8 @@ package com.delta.raft
 import akka.actor.{Actor, Props}
 import akka.pattern.ask
 import com.delta.rest.{Initialize, Member, ReplicaGroup, RestClient}
-import controller.RequestController.actorSystem
+import com.delta.raft.Utils.ac
+import com.typesafe.scalalogging.LazyLogging
 
 import java.util.UUID
 import scala.concurrent.Future
@@ -15,7 +16,8 @@ object StateManager {
     new StateManager(maxReplica, groupId: String, restClient)
 }
 
-case class StateManager(maxReplica: Int, groupId: String, restClient: RestClient) {
+case class StateManager(maxReplica: Int, groupId: String, restClient: RestClient)
+    extends LazyLogging {
   val membersMap = initialize()
   def initialize() = {
     val members = for {
@@ -26,9 +28,11 @@ case class StateManager(maxReplica: Int, groupId: String, restClient: RestClient
       for {
         member <- members
       } yield member -> {
-        val actor = actorSystem.actorOf(
+        val m = member.replaceAll("-", "_")
+        logger.info(s"member ${m}")
+        val actor = ac.actorOf(
           Server.props(replicaGroup, member, restClient),
-          member.replaceAll("-", "_")
+          m
         )
         actor ! Initialize
         actor
@@ -48,7 +52,7 @@ case class StateManager(maxReplica: Int, groupId: String, restClient: RestClient
   def killMember(memberId: String) = {
     membersMap.get(memberId) match {
       case Some(actor) =>
-        actorSystem.stop(actor)
+        ac.stop(actor)
         membersMap - memberId
       case None => println("No actor found")
     }
