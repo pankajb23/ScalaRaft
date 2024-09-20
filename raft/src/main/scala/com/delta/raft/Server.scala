@@ -19,10 +19,10 @@ import com.delta.rest.{
   VolatileStates,
   VolatileStatesOnLeader
 }
-import com.delta.utils.ActorPathLogging
+import com.delta.utils.{ActorPathLogging, BackOffComputation}
 
 import scala.concurrent.Future
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.{DurationInt, DurationLong}
 import scala.language.postfixOps
 import scala.util.{Failure, Random, Success}
 
@@ -38,6 +38,9 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
   import context.dispatcher
   val random = new Random()
   import context.dispatcher
+
+  override def preStart(): Unit =
+    logger.info(s"Starting server with id ${self.path.toStringWithoutAddress}")
 
   private var currentStates = PersistableStates()
   private var volatileStates = VolatileStates()
@@ -57,13 +60,13 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     case Initialize =>
       // vote for self for election
       // increase term count
-      currentStates = currentStates.incrementTerm
       logger.info(
         s"Initialized server as candidate, starting election with term ${currentStates.currentTerm}"
       )
       self ! ReElection
 
     case ReElection =>
+      currentStates = currentStates.incrementTerm
       logger.info(s"Starting re-election with self term ${currentStates.currentTerm}")
       startElection()
     // StartElection() and wait for any RPC response from any other server.
@@ -81,12 +84,17 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
   }
 
   var candidateServing: Option[String] = None
+  var mappedTermLeaderTuple: Option[(Long, String)] = None
+
   // only in case for candidate and follower not for leader.
   private def requestVote(): Receive = {
     case x: RequestVote =>
-      if (x.term >= currentStates.currentTerm) {
+      if (
+        x.term >= currentStates.currentTerm && (mappedTermLeaderTuple.isEmpty || (mappedTermLeaderTuple.isDefined && x.term > mappedTermLeaderTuple.get._1))
+      ) {
         // updating self term.
         currentStates = currentStates.withTerm(x.term)
+        mappedTermLeaderTuple = Some(x.term, x.candidateId)
         logger.info(s"Received vote request from ${x.candidateId} in term ${x.term}")
         if (x.lastLogIndex >= currentStates.lastCommitedLogIndex) {
           logger.info(s"Voting for ${x.candidateId} in term ${x.term}")
@@ -214,12 +222,11 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
           logger.info("Majority votes received, elected as leader")
           self ! LeaderElected
         } else {
-          val waitTime = (candidateStateForLastContigousTerm + 1) * 2 + random.nextInt(
-            candidateStateForLastContigousTerm
-          )
+          val waitTime =
+            BackOffComputation.computeBackoff(candidateStateForLastContigousTerm).toMillis.milliseconds
           logger.info(s"Majority votes not received, starting new election after some timeout waitTime ${waitTime} after term ${candidateStateForLastContigousTerm}")
           context.system.scheduler.scheduleOnce(
-            waitTime seconds,
+            waitTime,
             self,
             ReElection
           )

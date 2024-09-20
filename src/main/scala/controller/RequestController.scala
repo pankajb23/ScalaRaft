@@ -31,6 +31,7 @@ class RequestController @Inject() (val controllerComponents: ControllerComponent
     implicit request =>
       stateManager.routeRequest(memberId, request.body).transformWith {
         case Success(value) =>
+          println("value " + value)
           logger.info("value " + value)
           Future(Ok(Json.toJson(value.asInstanceOf[ResponseVote])))
         case Failure(exception) => Future.failed(exception)
@@ -39,9 +40,8 @@ class RequestController @Inject() (val controllerComponents: ControllerComponent
 
   def setup(): Action[AnyContent] = Action {
     logger.info("In setup")
-    println("In setup")
-    stateManager = StateManager.props(5, "group1", restClient)
-    stateManager.initialize()
+    stateManager = StateManager.props(3, "group1", restClient)
+    stateManager.membersMap
     Ok("setup done")
   }
 

@@ -26,18 +26,16 @@ case class RestClient @Inject() (hostUrl: String)(implicit ac: ActorSystem) exte
   def memberEndpoint(member: Member) = new MemberEndpoint(this, member)
 
   def post[Req, Resp](uri: Uri, req: Req)(implicit w: Writes[Req], r: Reads[Resp]): Future[Resp] = {
-    //    policy { () =>
-    println(s"POST $uri ${req}")
-
-    baseRequest.post(uri).body(req).response(asJson[Resp]).send(backend).map {
-      _.body match {
-        case Left(value) =>
-          println(s"POST $uri ${req} failed with ${value}")
-          throw new RuntimeException(value)
-        case Right(value) => value
+    policy { () =>
+      logger.info(s"POST $uri ${req}")
+      baseRequest.post(uri).body(req).response(asJson[Resp]).send(backend).map {
+        _.body match {
+          case Left(value) =>
+            throw new RuntimeException(value)
+          case Right(value) => value
+        }
       }
-    }
-    //    }(Success.always, ac.dispatcher)
+    }(Success.always, ac.dispatcher)
   }
 }
 

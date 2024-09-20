@@ -18,11 +18,14 @@ object StateManager {
 
 case class StateManager(maxReplica: Int, groupId: String, restClient: RestClient)
     extends LazyLogging {
-  val membersMap = initialize()
-  def initialize() = {
+
+  lazy val membersMap = initialize()
+  private def initialize() = {
+
     val members = for {
-      i <- 0 to maxReplica
+      i <- 1 to maxReplica
     } yield UUID.randomUUID().toString
+    logger.info(s"Setting server with replica count ${maxReplica} and group id ${groupId} with members ${members}")
     val replicaGroup = ReplicaGroup(members.map(x => Member(x)).toList, groupId)
     val ret = {
       for {
