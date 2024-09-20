@@ -31,7 +31,9 @@ case class RestClient @Inject() (hostUrl: String)(implicit ac: ActorSystem) exte
 
     baseRequest.post(uri).body(req).response(asJson[Resp]).send(backend).map {
       _.body match {
-        case Left(value)  => throw new RuntimeException(value)
+        case Left(value) =>
+          println(s"POST $uri ${req} failed with ${value}")
+          throw new RuntimeException(value)
         case Right(value) => value
       }
     }

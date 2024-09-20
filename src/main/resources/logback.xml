@@ -7,11 +7,13 @@
         </encoder>
     </appender>
 
-    <logger name="play" level="INFO" />
-    <logger name="application" level="DEBUG" />
-    <logger name="common" level="DEBUG" />
-    <logger name="lsm" level="DEBUG" />
-    <logger name="raft" level="DEBUG" />
+    <logger name="play" level="WARN" />
+    <logger name="application" level="INFO" />
+    <logger name="common" level="INFO" />
+    <logger name="lsm" level="INFO" />
+    <logger name="raft" level="INFO" />
+    <logger name="controller" level="INFO" />
+    <logger name="controller.RequestController" level="INFO" />
 
     <root level="DEBUG">
         <appender-ref ref="STDOUT" />

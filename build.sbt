@@ -4,6 +4,13 @@ ThisBuild / version := "1.0-SNAPSHOT"
 
 scalafmtOnCompile := true
 
+fork in run := true
+
+javaOptions in Universal ++= Seq(
+  "-Dlogback.debug=true",
+  "-Dlogger.file=logback.xml"
+)
+
 lazy val common = (project in file("common"))
   .enablePlugins(PlayScala)
   .settings(
@@ -39,6 +46,7 @@ lazy val root = (project in file("."))
   .settings(
     name := """DSoftware""",
     Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
+    Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
     libraryDependencies ++= Seq(
       guice,
       "org.scalatestplus.play" %% "scalatestplus-play" % "5.1.0" % Test

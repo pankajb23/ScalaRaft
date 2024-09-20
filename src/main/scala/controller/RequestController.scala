@@ -29,14 +29,17 @@ class RequestController @Inject() (val controllerComponents: ControllerComponent
 
   def requestVote(memberId: String): Action[RequestVote] = Action(parse.json[RequestVote]).async {
     implicit request =>
-      stateManager.routeRequest(memberId, request.body).mapTo[ResponseVote].transformWith {
-        case Success(value)     => Future(Ok(Json.toJson(value)))
+      stateManager.routeRequest(memberId, request.body).transformWith {
+        case Success(value) =>
+          logger.info("value " + value)
+          Future(Ok(Json.toJson(value.asInstanceOf[ResponseVote])))
         case Failure(exception) => Future.failed(exception)
       }
   }
 
   def setup(): Action[AnyContent] = Action {
     logger.info("In setup")
+    println("In setup")
     stateManager = StateManager.props(5, "group1", restClient)
     stateManager.initialize()
     Ok("setup done")
