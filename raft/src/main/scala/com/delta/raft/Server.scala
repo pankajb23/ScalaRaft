@@ -79,10 +79,10 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
 
     case entry: AppendEntry =>
       // save message but transition.
-      logger.info("Becoming follower")
+      logger.info(s"Becoming follower and log entry is ${entry}")
       currentMemberState = MemberStates.Follower
       context.become(follower())
-      self ! entry
+      self.forward(entry)
   }
 
   var candidateServing: Option[String] = None
@@ -135,7 +135,8 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
           sender ! AppendEntryResponse(currentStates.currentTerm, success = false)
         }
       }
-//    case _@AppendEntryResponse(term, flag) =>
+    case ReElection =>
+      logger.info("Received re-election request, but this is not correct message for follower")
 
   }
 
@@ -145,7 +146,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
       logger.info(s"Initialized leader with current term ${currentStates.currentTerm}")
       // send periodic heartbeats to all other servers
       self ! SendHB
-      hbs = context.system.scheduler.scheduleAtFixedRate(0.seconds, 5 seconds, self, SendHB)
+      hbs = context.system.scheduler.scheduleAtFixedRate(5.seconds, 5 seconds, self, SendHB)
 
     case NewEntry(entry: String) =>
       // append the new entry to the log

@@ -35,7 +35,7 @@ case class StateManager(maxReplica: Int, groupId: String, restClient: RestClient
         logger.info(s"member ${m}")
         val actor = ac.actorOf(
           Server.props(replicaGroup, member, restClient),
-          s"/user/child/$m"
+          s"child_${m}"
         )
         actor ! Initialize
         actor
