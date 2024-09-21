@@ -4,3 +4,11 @@ POST        /members/:memberid/appendEntry        controller.RequestController.a
 POST        /members/:memberid/requestVote        controller.RequestController.requestVote(memberid)
 
 POST        /setup                                controller.RequestController.setup()
+
+GET         /hb                                   controller.RequestController.healthCheck()
+
+POST        /members/addLogs                      controller.RequestController.addNewEntry()
+
+POST        /members/persistLogs                  controller.RequestController.persistLogs()
+
+POST        /members/killLeader                   controller.RequestController.killLeader()

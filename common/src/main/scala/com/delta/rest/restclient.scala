@@ -1,9 +1,8 @@
 package com.delta.rest
 
 import akka.actor.ActorSystem
-import com.delta.configuration.Configs
 import com.typesafe.scalalogging.LazyLogging
-import play.api.libs.json.{JsValue, Json, Reads, Writes}
+import play.api.libs.json.{Reads, Writes}
 import sttp.client3.{HttpClientFutureBackend, UriContext, basicRequest}
 import sttp.model.Uri
 import sttp.client3.playJson._
@@ -15,7 +14,7 @@ import scala.language.implicitConversions
 import scala.language.{implicitConversions, postfixOps}
 import retry._
 
-case class RestClient @Inject() (hostUrl: String)(implicit ac: ActorSystem) extends LazyLogging {
+case class RestClient(hostUrl: String)(implicit ac: ActorSystem) extends LazyLogging {
 
   import ac.dispatcher
 

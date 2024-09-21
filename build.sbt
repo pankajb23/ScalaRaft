@@ -46,11 +46,16 @@ lazy val root = (project in file("."))
   .settings(
     name := """DSoftware""",
     Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
+    Test / scalaSource := baseDirectory.value / "src" / "main" / "test",
     Compile / resourceDirectory := baseDirectory.value / "src" / "main" / "resources",
     libraryDependencies ++= Seq(
       guice,
       "org.scalatestplus.play" %% "scalatestplus-play" % "5.1.0" % Test
     )
   )
-  .dependsOn(common % "compile->compile;test->test", lsm % "compile->compile;test->test", raft % "compile->compile;test->test")
+  .dependsOn(
+    common % "compile->compile;test->test",
+    lsm % "compile->compile;test->test",
+    raft % "compile->compile;test->test"
+  )
   .aggregate(common, lsm, raft)
