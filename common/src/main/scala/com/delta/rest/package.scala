@@ -148,7 +148,15 @@ package object rest {
     }
   }
 
-  case class ReplicaGroup(members: List[Member], groupId: String, maxSize: Int = 3)
+  case class ReplicaGroup(
+    members: List[Member],
+    hostId: String,
+    groupId: String,
+    maxSize: Int = 3
+  ) {
+    def availableMembers: List[Member] = members
+    def otherMembers: List[Member] = members.filterNot(_.id == hostId)
+  }
   object ReplicaGroup {
     implicit val o: OFormat[ReplicaGroup] = Json.format[ReplicaGroup]
 

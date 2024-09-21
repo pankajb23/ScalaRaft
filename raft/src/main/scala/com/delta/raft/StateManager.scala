@@ -1,8 +1,9 @@
 package com.delta.raft
 
-import akka.actor.{Actor, Props}
+import akka.actor.ActorRef
 import akka.pattern.ask
-import com.delta.rest.{Initialize, Member, ReplicaGroup, RestClient}
+import akka.util.Timeout
+import com.delta.rest.{Member, ReplicaGroup, RestClient}
 import com.delta.raft.Utils.ac
 import com.typesafe.scalalogging.LazyLogging
 
@@ -12,40 +13,28 @@ import scala.concurrent.duration.DurationInt
 import scala.language.postfixOps
 
 object StateManager {
-  def props(maxReplica: Int, groupId: String, restClient: RestClient): StateManager =
+  def create(maxReplica: Int, groupId: String, restClient: RestClient): StateManager =
     new StateManager(maxReplica, groupId: String, restClient)
 }
 
 case class StateManager(maxReplica: Int, groupId: String, restClient: RestClient)
     extends LazyLogging {
+  implicit val timer: Timeout = akka.util.Timeout(5 seconds)
 
-  lazy val membersMap = initialize()
-  private def initialize() = {
-
-    val members = for {
-      i <- 1 to maxReplica
-    } yield UUID.randomUUID().toString
-    logger.info(s"Setting server with replica count ${maxReplica} and group id ${groupId} with members ${members}")
-    val replicaGroup = ReplicaGroup(members.map(x => Member(x)).toList, groupId)
-    val ret = {
-      for {
-        member <- members
-      } yield member -> {
-        val m = member.replaceAll("-", "_")
-        logger.info(s"member ${m}")
-        val actor = ac.actorOf(
-          Server.props(replicaGroup, member, restClient),
-          s"child_${m}"
-        )
-        actor ! Initialize
-        actor
-      }
+  lazy val membersMap: Map[String, ActorRef] = {
+    val members = (1 to maxReplica).toList.map(x => UUID.randomUUID().toString.replaceAll("-", "_"))
+    members.map { m =>
+      val actor = ac.actorOf(
+        Server.props(m, restClient),
+        m
+      )
+      logger.info(s"Initializing actor with id $m")
+      actor ! ReplicaGroup(members.map(x => Member(x)), m, groupId, members.size)
+      m -> actor
     }.toMap
-    ret
   }
 
   def routeRequest(memberId: String, msg: Any): Future[Any] = {
-    implicit val timer = akka.util.Timeout(5 seconds)
     membersMap.get(memberId) match {
       case Some(actor) => actor.ask(msg)
       case None        => Future.successful("No actor found")

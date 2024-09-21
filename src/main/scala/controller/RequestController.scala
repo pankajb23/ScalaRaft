@@ -38,7 +38,7 @@ class RequestController @Inject() (val controllerComponents: ControllerComponent
 
   def setup(): Action[AnyContent] = Action {
     logger.info("In setup")
-    stateManager = StateManager.props(3, "group1", restClient)
+    stateManager = StateManager.create(3, "group1", restClient)
     stateManager.membersMap
     Ok("setup done")
   }

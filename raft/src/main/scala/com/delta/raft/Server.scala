@@ -7,6 +7,7 @@ import com.delta.rest.{
   HeartBeat,
   Initialize,
   LeaderElected,
+  Member,
   MemberStates,
   NewEntry,
   PersistableStates,
@@ -28,14 +29,12 @@ import scala.language.postfixOps
 import scala.util.{Failure, Random, Success}
 
 object Server {
-  def props(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient): Props = Props(
-    new Server(replicaGroup, hostId: String, restClient)
+  def props(hostId: String, restClient: RestClient): Props = Props(
+    new Server(hostId, restClient)
   )
 }
 
-class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
-    extends Actor
-    with ActorPathLogging {
+class Server(hostId: String, restClient: RestClient) extends Actor with ActorPathLogging {
   import context.dispatcher
 
   override def preStart(): Unit =
@@ -45,12 +44,20 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
   private var volatileStates = VolatileStates()
   private var volatileStatesOnLeader = VolatileStatesOnLeader(Map.empty, Map.empty)
 
+  var replicaGroup: ReplicaGroup = _
   // new members can also join the group.
-  private var currentMembers = replicaGroup.members
   private var candidateStateForLastContigousTerm: Int = 1
   private var currentMemberState: MemberStates = MemberStates.Candidate
 
-  override def receive: Receive = candidate()
+  override def receive: Receive = uninitialized()
+
+  private def uninitialized(): Receive = {
+    case msg: ReplicaGroup =>
+      replicaGroup = msg
+      logger.info(s"Initialized server with id ${hostId} and replicaGroup ${msg}")
+      context.become(candidate())
+      self ! Initialize
+  }
 
   private def candidate(messages: List[Any] = Nil): Receive =
     requestVote().orElse(candidateBehaviour())
@@ -171,8 +178,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
     val latestLogIndex = currentStates.lastLogIndex()
     Future
       .sequence(
-        currentMembers
-          .filterNot(x => x.id == hostId)
+        replicaGroup.otherMembers
           .map { member =>
             val lastLogIndex = volatileStatesOnLeader.nextIndex.getOrElse(member.id, 0L)
             val lastLogTerm = volatileStatesOnLeader.nextIndexTerm.getOrElse(member.id, 0L)
@@ -210,7 +216,7 @@ class Server(replicaGroup: ReplicaGroup, hostId: String, restClient: RestClient)
 
   private def startElection(): Unit = {
     Future
-      .sequence(currentMembers.filterNot(x => x.id == hostId).map { member =>
+      .sequence(replicaGroup.otherMembers.map { member =>
         restClient
           .memberEndpoint(member)
           .requestVote(RequestVote(currentStates, hostId))
