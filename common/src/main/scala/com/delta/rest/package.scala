@@ -105,10 +105,14 @@ package object rest {
     def withLogs(entries: List[LogEntry], leaderCommit: Long): PersistableStates = {
       val (commitTableLogs, seenLogs) = log.partition(_._1 <= leaderCommit)
       val newLogs = seenLogs ++ entries.collect { case x: CommandEntry => x.index -> x }
+      val highestSeenPersistableLog =
+        persistableLogs.lastOption.map(_.asInstanceOf[CommandEntry].index).getOrElse(0L)
       copy(
         log = newLogs,
         lastCommitedLogIndex = leaderCommit,
-        persistableLogs = persistableLogs ++ commitTableLogs.values.toList
+        persistableLogs = persistableLogs ++ commitTableLogs.values.toList.filter(
+          _.asInstanceOf[CommandEntry].index > highestSeenPersistableLog
+        )
       )
     }
 
@@ -139,9 +143,13 @@ package object rest {
 
     def updateLastCommitedLog(min: Long): PersistableStates = {
       val (commitTableLogs, seenLogs) = log.partition(_._1 < min)
+      val maxSeenPersistableLogs =
+        persistableLogs.lastOption.map(_.asInstanceOf[CommandEntry].index).getOrElse(0L)
       copy(
         lastCommitedLogIndex = min,
-        persistableLogs = persistableLogs ++ commitTableLogs.values.toList
+        persistableLogs = persistableLogs ++ commitTableLogs.values.toList.filter(
+          _.asInstanceOf[CommandEntry].index > maxSeenPersistableLogs
+        )
       )
     }
   }
@@ -266,6 +274,7 @@ package object rest {
     override val values: IndexedSeq[LeaderKnown] = findValues
   }
   case object PersistLogs extends Verbs
+  case object LivenessCheck extends Verbs
 }
 
 object Delta extends App {

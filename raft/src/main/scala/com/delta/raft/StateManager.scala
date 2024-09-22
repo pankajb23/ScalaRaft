@@ -1,6 +1,6 @@
 package com.delta.raft
 
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.delta.rest.{FindLeader, LeaderKnown, Member, PersistLogs, ReplicaGroup, RequestWritten, ResponseVote, RestClient}
@@ -65,6 +65,22 @@ class StateManager(maxReplica: Int, groupId: String, restClient: RestClient)(imp
             exception
           )
           Future.failed(exception)
+      }
+  }
+
+  def killLeader() = {
+    val memberToAsk = membersMap.head._2
+    memberToAsk
+      .ask(FindLeader)
+      .mapTo[LeaderKnown]
+      .foreach {
+        case LeaderFound(hostId) =>
+          membersMap.get(hostId) match {
+            case Some(actor) => actor ! PoisonPill
+            case None        => Future.failed(new Exception(s"No actor found with id ${hostId}"))
+          }
+
+        case _ => Future.failed(new Exception("No leader found"))
       }
   }
 

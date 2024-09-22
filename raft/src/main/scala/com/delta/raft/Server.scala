@@ -11,6 +11,7 @@ import com.delta.rest.{
   HeartBeat,
   Initialize,
   LeaderElected,
+  LivenessCheck,
   Member,
   MemberStates,
   NewDataEntry,
@@ -56,6 +57,9 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
   // new members can also join the group.
   private var candidateStateForLastContigousTerm: Int = 1
   private var currentMemberState: MemberStates = MemberStates.Candidate
+  private val liveNessCheck =
+    context.system.scheduler.scheduleAtFixedRate(0.seconds, 5 seconds, self, LivenessCheck)
+  private var lastMessageReceived: Long = 0
 
   override def receive: Receive = uninitialized()
 
@@ -64,6 +68,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
       replicaGroup = msg
       logger.info(s"Initialized server with id ${hostId} and replicaGroup ${msg}")
       context.become(candidate())
+      // at first they will
       self ! Initialize
   }
 
@@ -81,6 +86,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
 
     case ReElection =>
       currentStates = currentStates.incrementTerm
+      currentMemberState = MemberStates.Candidate
       logger.info(s"Starting re-election with self term ${currentStates.currentTerm}")
       startElection()
     // StartElection() and wait for any RPC response from any other server.
@@ -178,6 +184,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
   }
 
   private def appendEntryToLog(entry: AppendEntry): Boolean = {
+    lastMessageReceived = System.currentTimeMillis()
     if (currentStates.currentTerm > entry.term) {
       logger.warn(s"""Rejecting append entry request from ${entry.leaderId} with term ${entry.term} whereas current term is ${currentStates.currentTerm} from ${sender().path.toStringWithoutAddress}""")
       false
@@ -244,7 +251,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
           self ! TransitionToCandidate
         }
         // atleast half of the servers have commited this result.
-        if (entries.count(_.success) > (replicaGroup.maxSize / 2)) {
+        if (entries.count(_.success) >= (replicaGroup.maxSize / 2)) {
           val t =
             volatileStatesOnLeader.matchIndex.filter(x =>
               x._2 > currentStates.lastCommitedLogIndex && volatileStatesOnLeader
@@ -259,7 +266,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
 
   private def startElection(): Unit = {
     Future
-      .sequence(replicaGroup.otherMembers.map { member =>
+      .sequence(replicaGroup.availableMembers.map { member =>
         restClient
           .memberEndpoint(member)
           .requestVote(RequestVote(currentStates, hostId))
@@ -314,6 +321,17 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
 
     case PersistLogs =>
       currentStates.persistLogs
+
+    case LivenessCheck =>
+      if (
+        lastMessageReceived + 10.seconds.toMillis < System
+          .currentTimeMillis() && currentMemberState == MemberStates.Follower
+      ) {
+        // if server is in candidate state, reelection would have been in progress. So no need to start re-election.
+        logger.info("No message received for 10 seconds, starting re-election")
+        context.become(candidate())
+        self ! ReElection
+      }
   }
   override def unhandled(message: Any): Unit =
     logger.warn(s"Unhandled message $message current state ${currentMemberState}")
