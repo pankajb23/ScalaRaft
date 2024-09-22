@@ -22,5 +22,6 @@ libraryDependencies ++= Seq(
   "com.softwaremill.retry" %% "retry" % "0.3.6",
   "com.typesafe.akka" %% "akka-serialization-jackson" % "2.8.0",
   "com.typesafe" %% "ssl-config-core" % "0.4.2",
-  "org.julienrf" %% "play-json-derived-codecs" % "10.1.0"
+  "org.julienrf" %% "play-json-derived-codecs" % "10.1.0",
+  "com.github.alexandrnikitin" %% "bloom-filter" % "0.13.1"
 )
