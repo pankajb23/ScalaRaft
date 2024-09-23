@@ -82,27 +82,6 @@ curl --location 'http://localhost:9000/members/addLogs' \
 curl --location 'http://localhost:9000/members/addLogs' \
 --header 'Content-Type: application/json' \
 --data '{
-    "key": "a62",
-    "value": "a"
-}'
-
-curl --location 'http://localhost:9000/members/addLogs' \
---header 'Content-Type: application/json' \
---data '{
-    "key": "a63",
-    "value": "a"
-}'
-
-curl --location 'http://localhost:9000/members/addLogs' \
---header 'Content-Type: application/json' \
---data '{
-    "key": "a64",
-    "value": "a"
-}'
-
-curl --location 'http://localhost:9000/members/addLogs' \
---header 'Content-Type: application/json' \
---data '{
     "key": "a65",
     "value": "a"
 }'
