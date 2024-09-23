@@ -39,7 +39,7 @@ class LSMTree(MaxMemtablesSize: Int) {
 
   def put(key: String, value: String): Unit = {
     memTables.put(key, Option(value))
-    if (memTables.size > 1000) {
+    if (memTables.size > 10) {
       flushToDisk()
     }
   }

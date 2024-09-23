@@ -66,7 +66,7 @@ class RequestController @Inject() (
     stateManager.killLeader()
     Ok("killLeader")
   }
- 
+
   def killMember: Action[AnyContent] = Action {
     Ok("killMember")
   }

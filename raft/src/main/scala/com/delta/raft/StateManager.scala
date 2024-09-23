@@ -4,9 +4,7 @@ import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.delta.rest.{FindLeader, LeaderKnown, Member, PersistLogs, ReplicaGroup, RequestWritten, ResponseVote, RestClient}
-import com.delta.raft.Utils.ac
 import com.delta.rest.LeaderKnown.LeaderFound
-import com.google.inject.{Inject, Singleton}
 import com.typesafe.scalalogging.LazyLogging
 
 import java.util.UUID
