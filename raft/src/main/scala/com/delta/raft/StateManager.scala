@@ -3,7 +3,7 @@ package com.delta.raft
 import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.pattern.ask
 import akka.util.Timeout
-import com.delta.rest.{FindLeader, LeaderKnown, Member, PersistLogs, ReplicaGroup, RequestWritten, ResponseVote, RestClient}
+import com.delta.rest.{DataStore, FindLeader, FlushLogs, LeaderKnown, Member, PersistLogs, ReplicaGroup, RequestWritten, ResponseVote, RestClient}
 import com.delta.rest.LeaderKnown.LeaderFound
 import com.typesafe.scalalogging.LazyLogging
 
@@ -25,12 +25,12 @@ class StateManager(maxReplica: Int, groupId: String, restClient: RestClient)(imp
 ) extends LazyLogging {
   implicit val timer: Timeout = akka.util.Timeout(5 seconds)
   import ac.dispatcher
-
+  val dsMap = scala.collection.mutable.Map[String, DataStore]()
   lazy val membersMap: Map[String, ActorRef] = {
     val members = (1 to maxReplica).toList.map(x => UUID.randomUUID().toString.replaceAll("-", "_"))
     members.map { m =>
       val actor = ac.actorOf(
-        Server.props(m, restClient),
+        Server.props(m, restClient, dsMap.getOrElseUpdate(m, new KVDataStore(m))),
         m
       )
       logger.info(s"Initializing actor with id $m")
@@ -105,4 +105,14 @@ class StateManager(maxReplica: Int, groupId: String, restClient: RestClient)(imp
         actor ! PersistLogs
     }
   }
+
+  def flushLogs(): Unit = {
+    membersMap.foreach {
+      case (_, actor) =>
+        actor ! FlushLogs
+    }
+  }
+
+  def get(key: String): Option[String] =
+    dsMap.head._2.get(key)
 }

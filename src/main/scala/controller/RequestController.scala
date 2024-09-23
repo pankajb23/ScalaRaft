@@ -54,6 +54,11 @@ class RequestController @Inject() (
     Ok("persistLogs")
   }
 
+  def flushLogs(): Action[AnyContent] = Action {
+    stateManager.flushLogs()
+    Ok("flushLogs")
+  }
+
   def healthCheck(): Action[AnyContent] = Action {
     Ok("healthCheck")
   }
@@ -69,5 +74,12 @@ class RequestController @Inject() (
 
   def killMember: Action[AnyContent] = Action {
     Ok("killMember")
+  }
+
+  def getKey(key: String): Action[AnyContent] = Action {
+    stateManager.get(key) match {
+      case Some(value) => Ok(value)
+      case None        => NotFound
+    }
   }
 }

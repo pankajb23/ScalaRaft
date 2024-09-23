@@ -16,13 +16,13 @@ import scala.util.Using
  *
  * SSTables can be further compressed using snappy or any other compression algorithm.
  */
-class LSMTree(MaxMemtablesSize: Int) {
+class LSMTree(host:String) {
   // tree map is a sorted map with concurrent support.
 
   private val memTables = new mutable.TreeMap[String, Option[String]]()
   private val indexes = new mutable.TreeMap[String, (Int, Long)]()
   private var currentFileId: Int = 0
-  private def get(key: String): Option[String] = {
+  def get(key: String): Option[String] = {
     memTables
       .get(key)
       .orElse {
@@ -37,8 +37,8 @@ class LSMTree(MaxMemtablesSize: Int) {
       .flatten
   }
 
-  def put(key: String, value: String): Unit = {
-    memTables.put(key, Option(value))
+  def put(key: String, value: Option[String]): Unit = {
+    memTables.put(key, value)
     if (memTables.size > 10) {
       flushToDisk()
     }
@@ -47,7 +47,7 @@ class LSMTree(MaxMemtablesSize: Int) {
   def flushToDisk(): Unit = {
     if (memTables.isEmpty) return
     val filename = s"sstable_${currentFileId}.dat"
-    Using(new ObjectOutputStream(new FileOutputStream(s"/tmp/${filename}"))) { out =>
+    Using(new ObjectOutputStream(new FileOutputStream(s"/tmp/${host}_${filename}"))) { out =>
       memTables.zipWithIndex.map {
         case ((key, value), index) =>
           out.writeObject((key, value))

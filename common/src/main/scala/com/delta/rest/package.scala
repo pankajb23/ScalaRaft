@@ -63,7 +63,7 @@ package object rest {
   object LogEntry extends enumeratum.Enum[LogEntry] {
     override def values: IndexedSeq[LogEntry] = findValues
 
-    case class CommandEntry(index: Long, term: Long, command: String) extends LogEntry
+    case class CommandEntry(index: Long, term: Long, key: String, value: String) extends LogEntry
     object CommandEntry {
       implicit val f: OFormat[CommandEntry] = derived.oformat[CommandEntry]()
     }
@@ -80,22 +80,22 @@ package object rest {
     votedFor: Option[String] = None,
     log: Map[Long, LogEntry] = TreeMap.empty,
     lastCommitedLogIndex: Long = 0L,
-    persistableLogs: List[LogEntry] = List.empty
+    persistableLogs: List[LogEntry] = List.empty,
+    ds: DataStore
   ) extends LazyLogging {
     def incrementTerm: PersistableStates = copy(currentTerm = currentTerm + 1)
 
     def doesContainAnEntryAtIndex(index: Long, term: Long): Boolean = {
       val t = log.get(index)
-      logger.info(s"log entry at index ${t} and term ${term} and ${index} and ${log}")
+      logger.info(s"log entry at previous index ${t} and previous term ${term} and previous ${index} and all ${log}")
       // only appending command entry to the log
       log.isEmpty || log.get(index).exists(entry => entry.asInstanceOf[CommandEntry].term == term)
     }
 
-    def addLogs(entries: List[String]): PersistableStates = {
+    def addLogs(entry: NewDataEntry): PersistableStates = {
       val lastIndex = lastLogIndex()
-      val newEntries = entries.zipWithIndex.map {
-        case (entry, index) =>
-          lastIndex + index + 1 -> CommandEntry(lastIndex + index + 1, currentTerm, entry)
+      val newEntries = Map{
+        lastIndex + 1 -> CommandEntry(lastIndex + 1, currentTerm, entry.key, entry.value)
       }
       copy(
         log = log ++ newEntries
@@ -103,16 +103,25 @@ package object rest {
     }
 
     def withLogs(entries: List[LogEntry], leaderCommit: Long): PersistableStates = {
-      val (commitTableLogs, seenLogs) = log.partition(_._1 <= leaderCommit)
-      val newLogs = seenLogs ++ entries.collect { case x: CommandEntry => x.index -> x }
-      val highestSeenPersistableLog =
-        persistableLogs.lastOption.map(_.asInstanceOf[CommandEntry].index).getOrElse(0L)
+      val (commitTableLogs, appliedLogs) = log.partition(_._1 <= leaderCommit)
+      val newLogs = appliedLogs ++ entries.collect { case x: CommandEntry => x.index -> x }
+
+      val newPersistableLogs = commitTableLogs.values.toList
+        .filter(
+          _.asInstanceOf[CommandEntry].index > lastCommitedLogIndex
+        )
+
+      newPersistableLogs.foreach { entry =>
+        val t = entry.asInstanceOf[CommandEntry]
+        ds.put(
+          t.key,
+          Some(t.value)
+        )
+      }
       copy(
         log = newLogs,
         lastCommitedLogIndex = leaderCommit,
-        persistableLogs = persistableLogs ++ commitTableLogs.values.toList.filter(
-          _.asInstanceOf[CommandEntry].index > highestSeenPersistableLog
-        )
+        persistableLogs = persistableLogs ++ newPersistableLogs
       )
     }
 
@@ -120,7 +129,7 @@ package object rest {
       copy(currentTerm = term)
 
     def lastLogIndex(): Long =
-      log.lastOption.map(_._1).getOrElse(0L)
+      log.lastOption.map(_._1).getOrElse(lastCommitedLogIndex)
 
     def getLogEntriesFromIndex(from: Long): List[LogEntry] =
       log.filter(_._1 >= from).values.toList
@@ -130,7 +139,7 @@ package object rest {
       log.get(index).map(_.asInstanceOf[CommandEntry])
     }
 
-    def persistLogs(): Unit =
+    def flushLogs(): Unit = {
       Files.write(
         Paths.get(s"/Users/pankajb23/workspace/$hostId.json"),
         Json.prettyPrint(Json.toJson(persistableLogs)).getBytes(StandardCharsets.UTF_8),
@@ -139,24 +148,38 @@ package object rest {
         StandardOpenOption.WRITE
       )
 
+    }
+
+    def persistLogs(): Unit =
+      ds.persist
+
     def logAtIndex(index: Long): Option[LogEntry] = log.get(index)
 
     def updateLastCommitedLog(min: Long): PersistableStates = {
-      val (commitTableLogs, seenLogs) = log.partition(_._1 < min)
-      val maxSeenPersistableLogs =
-        persistableLogs.lastOption.map(_.asInstanceOf[CommandEntry].index).getOrElse(0L)
-      copy(
-        lastCommitedLogIndex = min,
-        persistableLogs = persistableLogs ++ commitTableLogs.values.toList.filter(
-          _.asInstanceOf[CommandEntry].index > maxSeenPersistableLogs
+      val (committableLogs, seenLogs) = log.partition(_._1 <= min)
+      val newLogs = committableLogs.values.toList
+        .filter(
+          _.asInstanceOf[CommandEntry].index > lastCommitedLogIndex
         )
+
+      newLogs.foreach { entry =>
+        val t = entry.asInstanceOf[CommandEntry]
+        ds.put(
+          t.key,
+          Some(t.value)
+        )
+      }
+      copy(
+        log = seenLogs,
+        lastCommitedLogIndex = min,
+        persistableLogs = persistableLogs ++ newLogs
       )
     }
   }
 
-  object PersistableStates {
-    implicit val f: OFormat[PersistableStates] = Json.format[PersistableStates]
-  }
+//  object PersistableStates {
+//    implicit val f: OFormat[PersistableStates] = Json.format[PersistableStates]
+//  }
 
   case class VolatileStates(commitIndex: Long = 0L, lastApplied: Long = 0) {
     def withCommitIndex(cIndex: Long): VolatileStates = copy(commitIndex = cIndex)
@@ -254,13 +277,13 @@ package object rest {
     case object Candidate extends MemberStates
   }
 
-  case class NewDataEntry(entry: String) extends Verbs
+  case class NewDataEntry(key: String, value: String) extends Verbs
   object NewDataEntry {
     implicit val o: OFormat[NewDataEntry] = Json.format[NewDataEntry]
   }
   case object FindLeader extends Verbs
 
-  case class RequestWritten(term: Long, index: Long) extends Verbs
+  case class RequestWritten(term: Long, index: Long, success: Boolean = false) extends Verbs
   object RequestWritten {
     implicit val o: OFormat[RequestWritten] = Json.format[RequestWritten]
   }
@@ -274,11 +297,18 @@ package object rest {
     override val values: IndexedSeq[LeaderKnown] = findValues
   }
   case object PersistLogs extends Verbs
+  case object FlushLogs extends Verbs
   case object LivenessCheck extends Verbs
+
+  trait DataStore {
+    def put(key: String, value: Option[String]): Unit
+    def get(key: String): Option[String]
+    def persist: Unit
+  }
 }
 
 object Delta extends App {
-  val t = AppendEntry(1, "1", 0, 0, List(CommandEntry(1, 1, "hello")), 0)
-  val json = Json.toJson(t)
-  println(json)
+//  val t = AppendEntry(1, "1", 0, 0, List(CommandEntry(1, 1, "hello")), 0)
+//  val json = Json.toJson(t)
+//  println(json)
 }

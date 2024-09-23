@@ -2,20 +2,18 @@ package com.delta.raft
 
 import akka.actor.{Actor, Cancellable, Props}
 import com.delta.rest.LeaderKnown.{LeaderFound, NoLeaderFound}
-import com.delta.rest.LogEntry.CommandEntry
-import com.delta.rest.MemberStates.{Candidate, Follower}
+import com.delta.rest.MemberStates.Follower
 import com.delta.rest.{
   AppendEntry,
   AppendEntryResponse,
+  DataStore,
   FindLeader,
-  HeartBeat,
+  FlushLogs,
   Initialize,
   LeaderElected,
   LivenessCheck,
-  Member,
   MemberStates,
   NewDataEntry,
-  NewEntry,
   PersistLogs,
   PersistableStates,
   ReElection,
@@ -37,18 +35,20 @@ import scala.language.postfixOps
 import scala.util.{Failure, Random, Success}
 
 object Server {
-  def props(hostId: String, restClient: RestClient): Props = Props(
-    new Server(hostId, restClient)
+  def props(hostId: String, restClient: RestClient, ds: DataStore): Props = Props(
+    new Server(hostId, restClient, ds)
   )
 }
 
-class Server(hostId: String, restClient: RestClient) extends Actor with ActorPathLogging {
+class Server(hostId: String, restClient: RestClient, ds: DataStore)
+    extends Actor
+    with ActorPathLogging {
   import context.dispatcher
 
   override def preStart(): Unit =
     logger.info(s"Starting server with id ${self.path.toStringWithoutAddress}")
 
-  private var currentStates = PersistableStates(hostId)
+  private var currentStates = PersistableStates(hostId, ds = ds)
   private var volatileStates = VolatileStates()
   private var volatileStatesOnLeader = VolatileStatesOnLeader(Map.empty, Map.empty)
 
@@ -73,7 +73,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
   }
 
   private def candidate(messages: List[Any] = Nil): Receive =
-    requestVote().orElse(candidateBehaviour()).orElse(leaderQuery())
+    requestVote().orElse(candidateBehaviour()).orElse(commonBehaviour())
 
   private def candidateBehaviour(messages: List[Any] = Nil): Receive = {
     case Initialize =>
@@ -95,7 +95,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
       logger.info("Elected as leader")
       candidateStateForLastContigousTerm = 1
       currentMemberState = MemberStates.Leader
-      context.become(leader().orElse(leaderQuery()))
+      context.become(leader().orElse(commonBehaviour()))
       self ! Initialize
 
     case entry: AppendEntry =>
@@ -110,7 +110,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
         logger.info(s"Becoming follower and log entry is $entry")
         lastKnownLeader = entry.leaderId
         currentMemberState = MemberStates.Follower
-        context.become(follower().orElse(leaderQuery()))
+        context.become(follower().orElse(commonBehaviour()))
       } else {
         logger.info(s"Rejecting append entry request from ${entry.leaderId} with term ${entry.term} from ${sender.path.toStringWithoutAddress}")
         // Re-election might be required or probably triggered.
@@ -163,20 +163,46 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
       // send periodic heartbeats to all other servers
       hbs = context.system.scheduler.scheduleAtFixedRate(0.seconds, 5 seconds, self, SendHB)
 
-    case NewDataEntry(entry: String) =>
+    case entry@NewDataEntry(key: String, value:String) =>
       // append the new entry to the log
       // send the entry to all other servers
       // update the commit index
-      logger.info(s"Received new entry from client $entry")
-      currentStates = currentStates.addLogs(List(entry))
-      sender() ! RequestWritten(currentStates.currentTerm, index = currentStates.lastLogIndex())
+      logger.info(s"Received new entry from client $key")
+      currentStates = currentStates.addLogs(entry)
+      val sender = context.sender()
       updateAppendEntries()
+        .map {
+          case true =>
+            currentStates = currentStates.updateLastCommitedLog(currentStates.lastLogIndex())
+            sender ! RequestWritten(
+              currentStates.currentTerm,
+              index = currentStates.lastLogIndex(),
+              success = true
+            )
+          case false =>
+            sender ! RequestWritten(
+              currentStates.currentTerm,
+              index = currentStates.lastLogIndex(),
+              success = false
+            )
+        }
+        .recoverWith {
+          case e =>
+            logger.error("Failed to update append entries", e)
+            Future.successful(
+              sender ! RequestWritten(
+                currentStates.currentTerm,
+                index = currentStates.lastLogIndex(),
+                success = false
+              )
+            )
+        }
 
     case TransitionToCandidate =>
       hbs.cancel()
       logger.info("Transitioning to candidate")
       currentMemberState = MemberStates.Candidate
-      context.become(candidate().orElse(leaderQuery()))
+      context.become(candidate().orElse(commonBehaviour()))
       self ! Initialize
 
     case SendHB =>
@@ -200,13 +226,13 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
         currentStates = currentStates.withLogs(entry.entries, entry.leaderCommit)
         true
       } else {
-        logger.warn(s"""Rejecting append entry request from ${entry.leaderId} with term ${entry.term} because of log index from ${sender().path.toStringWithoutAddress} and log size ${currentStates.log}""")
+        logger.warn(s"""Rejecting append entry request from ${entry} with term ${currentStates.lastCommitedLogIndex} because of log index from ${sender().path.toStringWithoutAddress} and log size ${currentStates.log}""")
         false
       }
     }
   }
 
-  private def updateAppendEntries(): Unit = {
+  private def updateAppendEntries(): Future[Boolean] = {
     val latestLogIndex = currentStates.lastLogIndex()
     Future
       .sequence(
@@ -229,6 +255,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
               .transformWith {
                 case Success(value) =>
                   if (value.success) {
+                    logger.info(s"Latest log index is ${latestLogIndex} for member ${member.id}")
                     volatileStatesOnLeader = volatileStatesOnLeader
                       .updateNextIndex(member.id, latestLogIndex, currentStates.currentTerm)
                       .updateMatchIndex(member.id, latestLogIndex)
@@ -245,13 +272,13 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
               }
           }
       )
-      .foreach { entries =>
+      .map { entries =>
         if (entries.exists(resp => resp.term > currentStates.currentTerm)) {
           logger.info("Received higher term from other server, stepping down as leader")
           self ! TransitionToCandidate
-        }
-        // atleast half of the servers have commited this result.
-        if (entries.count(_.success) >= (replicaGroup.maxSize / 2)) {
+          false
+        } else if (entries.count(_.success) >= (replicaGroup.maxSize / 2)) {
+          // atleast half of the servers have commited this result.
           val t =
             volatileStatesOnLeader.matchIndex.filter(x =>
               x._2 > currentStates.lastCommitedLogIndex && volatileStatesOnLeader
@@ -260,6 +287,9 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
           if (t.size >= (replicaGroup.maxSize / 2)) {
             currentStates = currentStates.updateLastCommitedLog(t.values.min)
           }
+          true
+        } else {
+          false
         }
       }
   }
@@ -309,7 +339,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
       }
   }
 
-  def leaderQuery(): Receive = {
+  private def commonBehaviour(): Receive = {
     case FindLeader =>
       if (currentMemberState == MemberStates.Leader) {
         sender() ! LeaderFound(hostId)
@@ -320,7 +350,10 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
       }
 
     case PersistLogs =>
-      currentStates.persistLogs
+      currentStates.persistLogs()
+
+    case FlushLogs =>
+      currentStates.flushLogs()
 
     case LivenessCheck =>
       if (
@@ -333,6 +366,7 @@ class Server(hostId: String, restClient: RestClient) extends Actor with ActorPat
         self ! ReElection
       }
   }
+
   override def unhandled(message: Any): Unit =
-    logger.warn(s"Unhandled message $message current state ${currentMemberState}")
+    logger.warn(s"Unhandled message $message current state $currentMemberState")
 }

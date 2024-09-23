@@ -11,4 +11,8 @@ POST        /members/addLogs                      controller.RequestController.a
 
 POST        /members/persistLogs                  controller.RequestController.persistLogs()
 
+POST        /members/flushLogs                    controller.RequestController.flushLogs()
+
 POST        /members/killLeader                   controller.RequestController.killLeader()
+
+GET         /key/:key                             controller.RequestController.getKey(key)
