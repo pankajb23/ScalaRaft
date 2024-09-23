@@ -1,6 +1,7 @@
 # Raft and LSM Trees Implementation with Scala and Akka
 
-A working project implementing the basics of the Raft consensus algorithm and Log-Structured Merge (LSM) trees using Scala and Akka.
+A working project implementing the basics of the Raft consensus algorithm and Log-Structured Merge (LSM) trees using
+Scala and Akka.
 
 ## Table of Contents
 
@@ -8,16 +9,18 @@ A working project implementing the basics of the Raft consensus algorithm and Lo
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
-  - [Setup](#setup)
-  - [Adding Data](#adding-data)
-  - [Flushing Logs](#flushing-logs)
+    - [Setup](#setup)
+    - [Adding Data](#adding-data)
+    - [Flushing Logs](#flushing-logs)
 - [Limitations](#limitations)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Introduction
 
-This project is an experimental implementation that combines the Raft consensus algorithm with Log-Structured Merge (LSM) trees using Scala and Akka. It serves as a proof of concept to demonstrate that Raft can be built using Akka in a Scala application.
+This project is an experimental implementation that combines the Raft consensus algorithm with Log-Structured Merge (
+LSM) trees using Scala and Akka. It serves as a proof of concept to demonstrate that Raft can be built using Akka in a
+Scala application.
 
 ## Features
 
@@ -122,7 +125,8 @@ curl -X POST http://localhost:9000/members/flushLogs
 
 ## Limitations
 
-- **Experimental Implementation**: The correctness of the implementation is still under evaluation. As with other distributed systems, achieving consistency and fault tolerance is complex.
+- **Experimental Implementation**: The correctness of the implementation is still under evaluation. As with other
+  distributed systems, achieving consistency and fault tolerance is complex.
 - **Not Production-Ready**: This project is intended for educational and experimental purposes.
 
 ## Contributing
@@ -136,6 +140,5 @@ This project is licensed under the [MIT License](LICENSE).
 ---
 
 *Note: This project is an experiment to demonstrate that Raft can be built using Akka in a Scala application.*
-
 
 developer: @pankajbhardwaj
